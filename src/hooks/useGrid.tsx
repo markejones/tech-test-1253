@@ -101,7 +101,6 @@ export function useGrid() {
       return params.value?.value ?? ""; // Return the cell value or an empty string if undefined
     },
     valueParser: (params) => {
-      console.log("blargh", params);
       const value = params.newValue;
       const cell: Cell = {
         value: evaluateFormula(value, grid) || value, // Evaluate formula if it starts with '='
