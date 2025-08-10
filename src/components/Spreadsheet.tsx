@@ -1,19 +1,19 @@
 import React from "react";
 import { AgGridReact } from "ag-grid-react";
-import { useGrid } from "../hooks/useGrid";
+import { ColumnKey, useGrid } from "../hooks/useGrid";
 import { agGridTheme } from "../theme/agGridTheme";
 
 export function Spreadsheet() {
-  const { columns, cells, updateCellValue } = useGrid();
+  const { columns, rows, updateCellValue } = useGrid();
 
   React.useEffect(() => {
-    console.log("Spreadsheet updated with cells:", cells);
-  }, [cells]);
+    console.log("Spreadsheet updated with rows:", rows);
+  }, [rows]);
 
   return (
     <div style={{ height: "600px" }}>
       <AgGridReact
-        rowData={cells}
+        rowData={rows}
         columnDefs={columns}
         theme={agGridTheme}
         onCellValueChanged={(event) => {
@@ -21,7 +21,7 @@ export function Spreadsheet() {
           console.log("event", event);
           updateCellValue({
             rowId: rowIndex!,
-            columnId: column.getColId(),
+            columnId: column.getColId() as ColumnKey,
             value: event.value,
           });
         }}

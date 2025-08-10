@@ -1,47 +1,35 @@
 import React from "react";
 import { ColDef } from "ag-grid-community";
 
-// Flat data structure for easier updates.
 type Cell = {
-  rowId: number;
-  columnId: string;
   value: string;
-  formula?: string;
+  formula?: string; // Optional, used if the cell contains a formula
 };
 
-type ColumnId = string;
-
-type Row = Record<ColumnId, Cell>;
-
-// the key is a composite of column ID and row ID, formatted as columnId-rowId
-type Grid = Record<string, Cell>;
-
-export type { Cell, Grid };
-
-type UpdateCellArgs = {
+// Flat data structure for easier updates.
+type Row = {
   rowId: number;
-  columnId: string;
-  value: string;
-};
+} & Partial<{
+  [K in ColumnKey]: Cell;
+}>;
+
+type RowId = number;
+type Grid = Record<RowId, Row>;
+
+export type { Row, Grid, ColumnKey, Cell };
 
 function generateGrid(columns: ColDef[], rows: number): Grid {
   const grid: Grid = {};
-
   for (let rowId = 1; rowId <= rows; rowId++) {
-    for (const column of columns) {
-      const key = `${column.field}${rowId}`;
-      grid[key] = {
-        rowId,
-        columnId: column.field!,
-        value: "",
-      };
-    }
+    grid[rowId] = {
+      rowId,
+    };
   }
 
   return grid;
 }
 
-const columns: ColDef[] = [
+const columnFields = [
   "a",
   "b",
   "c",
@@ -68,26 +56,31 @@ const columns: ColDef[] = [
   "x",
   "y",
   "z",
-].map((letter) => ({
-  field: letter,
-  editable: true,
-  headerName: letter.toUpperCase(),
-}));
+] as const;
 
-const defaultGrid: Grid = generateGrid(columns, 100);
+type ColumnKey = (typeof columnFields)[number];
 
 function evaluateFormula(_formula: string, grid: Grid): string {
   try {
     // Replace all cell references like A1, b2, etc.
-    const expression = _formula.replace(/([a-zA-Z]+)(\d+)/g, (_, col, row) => {
-      const refKey = `${col.toLowerCase()}${parseInt(row, 10)}`;
+    const expression = _formula.replace(
+      /([a-zA-Z]+)(\d+)/g,
+      (_, colId, rowId) => {
+        if (!columnFields.includes(colId as ColumnKey)) {
+          throw new Error(`Invalid column reference: ${colId}`);
+        }
 
-      const cell = grid[refKey];
-      console.log("cell", cell);
-      const cellValue = cell?.value ?? "0";
-      const numeric = parseFloat(cellValue);
-      return isNaN(numeric) ? "0" : numeric.toString();
-    });
+        if (!grid[rowId]) {
+          throw new Error(`Row with ID ${rowId} does not exist.`);
+        }
+
+        const _row = grid[rowId];
+        const _cell = _row[colId as ColumnKey];
+        const cellValue = _cell?.value ?? "0";
+        const numeric = parseFloat(cellValue);
+        return isNaN(numeric) ? "0" : numeric.toString();
+      }
+    );
 
     // Evaluate the numeric expression
     const result = Function(`return ${expression}`)();
@@ -98,76 +91,103 @@ function evaluateFormula(_formula: string, grid: Grid): string {
 }
 
 export function useGrid() {
+  const columns: ColDef[] = columnFields.map((letter) => ({
+    field: letter,
+    editable: true,
+    headerName: letter.toUpperCase(),
+    cellDataType: "object",
+    valueFormatter: (params) => {
+      console.log("params", params);
+      return params.value?.value ?? ""; // Return the cell value or an empty string if undefined
+    },
+    valueParser: (params) => {
+      console.log("blargh", params);
+      const value = params.newValue;
+      const cell: Cell = {
+        value: evaluateFormula(value, grid) || value, // Evaluate formula if it starts with '='
+        formula: value.startsWith("=") ? value : undefined, // Store the formula if it exists
+      };
+      return cell; // Return an object with the value for consistency
+    },
+    keyCreator: (params) => {
+      return params.colDef.field as ColumnKey;
+    },
+  }));
+  const defaultGrid: Grid = generateGrid(columns, 100);
+
   const [grid, setGrid] = React.useState<Grid>(defaultGrid);
 
-  function updateCellValue({ rowId, columnId, value: _value }: UpdateCellArgs) {
+  function updateCellValue({
+    rowId,
+    columnId,
+    value: _value,
+  }: { rowId: number; columnId: ColumnKey } & Omit<Cell, "formula">) {
     setGrid((previousGridState) => {
-      const key = `${columnId}${rowId}`;
-      const existingCell = previousGridState[key];
+      const existingRow = previousGridState[rowId];
 
-      // User is entering a formula
+      console.log("Updating cell:", {
+        rowId,
+        columnId,
+        value: _value,
+      });
+
+      if (!existingRow) {
+        console.warn(`Row with ID ${rowId} does not exist.`);
+        return previousGridState;
+      }
+
       if (_value.startsWith("=")) {
+        // User is entering a formula
         const formula = _value.slice(1); // remove '='
         const evaluatedValue = evaluateFormula(formula, previousGridState);
 
         console.log("evaluatedValue", evaluatedValue);
         return {
           ...previousGridState,
-          [key]: {
-            value: evaluatedValue,
-            // need to include the '=', so use the raw value
-            formula: _value,
-            rowId: existingCell.rowId,
-            columnId: existingCell.columnId,
+          [rowId]: {
+            ...existingRow,
+            [columnId]: {
+              value: evaluatedValue,
+              formula: _value, // store the raw value with '='
+            },
           },
         };
       }
 
       return {
         ...previousGridState,
-        [key]: {
-          ...existingCell,
-          value: _value,
+        [rowId]: {
+          ...existingRow,
+          [columnId]: {
+            value: _value,
+          },
         },
       };
     });
   }
 
-  function updateRowName(rowId: number, displayName: string) {
-    setGrid((previousGridState) => {
-      const updatedGrid = { ...previousGridState };
-      for (const key in updatedGrid) {
-        if (updatedGrid[key].rowId === rowId) {
-          updatedGrid[key].value = displayName;
-        }
-      }
-      return updatedGrid;
-    });
-  }
-
-  function updateColumnName(columnId: string, displayName: string) {
-    setGrid((previousGridState) => {
-      const updatedGrid = { ...previousGridState };
-      for (const key in updatedGrid) {
-        if (updatedGrid[key].columnId === columnId) {
-          updatedGrid[key].value = displayName;
-        }
-      }
-      return updatedGrid;
-    });
-  }
-
   function readCellValue(rowId: number, columnId: string): string {
-    const key = `${columnId}${rowId}`;
-    return grid[key].value;
+    const row = grid[rowId];
+    if (!row) {
+      console.warn(`Row with ID ${rowId} does not exist.`);
+      return "";
+    }
+
+    const cell = row[columnId as ColumnKey];
+    if (!cell) {
+      console.warn(
+        `Cell with column ID ${columnId} does not exist in row ${rowId}.`
+      );
+      return "";
+    }
+
+    return cell.value;
   }
 
   return {
     updateCellValue,
     readCellValue,
-    updateRowName,
-    updateColumnName,
     columns,
-    cells: Object.values(grid),
+    rows: Object.values(grid),
   };
 }
