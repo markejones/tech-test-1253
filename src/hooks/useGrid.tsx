@@ -61,6 +61,10 @@ const columnFields = [
 type ColumnKey = (typeof columnFields)[number];
 
 function evaluateFormula(_formula: string, grid: Grid): string {
+  if (!_formula.startsWith("=")) {
+    return _formula; // Not a formula, return as is
+  }
+
   try {
     // Replace all cell references like A1, b2, etc.
     const expression = _formula.replace(
@@ -83,10 +87,10 @@ function evaluateFormula(_formula: string, grid: Grid): string {
     );
 
     // Evaluate the numeric expression
-    const result = Function(`return ${expression}`)();
+    const result = Function(`return ${expression.split("=")[1]}`)();
     return result.toString();
   } catch (err) {
-    return "#ERR";
+    throw err;
   }
 }
 
